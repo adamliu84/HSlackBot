@@ -8,12 +8,10 @@ module Handler.Slack where
 import Import
 import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
+import qualified Data.Text.Encoding (encodeUtf8)
 import qualified Data.ByteString.Lazy.Char8 as LB (ByteString, pack)
 import Data.Aeson
 import qualified Yesod.Core.Json as YJ
-
-bot_token :: ByteString
-bot_token = "Bearer xxxyyyzzz"
 
 base_url :: String
 base_url = "https://slack.com/api/"
@@ -25,12 +23,18 @@ postSlackR :: Handler YJ.Value
 postSlackR = do
         response <- liftIO $ sendMessage
         returnJson response
+{-
+SLACK
+|-}
+getSlackAuthToken :: ByteString
+getSlackAuthToken = "Bearer " ++ (Data.Text.Encoding.encodeUtf8 $ slackAuthToken compileTimeAppSettings)
 
 sendMessage :: IO Object
 sendMessage = do
     initialRequest <- parseRequest (base_url ++ "/chat.postMessage")
-    let request =  initialRequest { method = "POST", 
-                                    requestHeaders = [("Authorization", bot_token), ("content-type","application/json")],
+    let authToken = getSlackAuthToken
+        request =  initialRequest { method = "POST",
+                                    requestHeaders = [("Authorization", authToken), ("content-type","application/json")],
                                     requestBody = RequestBodyLBS sample_body_json
                                   }
     manager <- Network.HTTP.Client.newManager tlsManagerSettings

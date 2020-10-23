@@ -27,3 +27,4 @@ ip-from-header: "_env:YESOD_IP_FROM_HEADER:false"
 
 copyright: Insert copyright statement here
 #analytics: UA-YOURCODE
+slack-auth-token: xxxxyyyyzzzz
