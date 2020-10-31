@@ -14,13 +14,12 @@ import Data.Aeson
 import qualified Yesod.Core.Json as YJ
 import Data.Maybe (fromJust)
 
-data EventType = UrlVerification {challenge::Text} | EventTypeError deriving (Show)
+data EventType = UrlVerification {challenge::Text} |
+                 Message {user::Text, user_message::Text} |
+                 EventTypeError deriving (Show)
 
 base_url :: String
 base_url = "https://slack.com/api/"
-
-sample_body_json :: LB.ByteString
-sample_body_json = LB.pack "{\"channel\":\"#testing\",\"text\":\"A API message from HSlackBot\"}"
 
 postSlackR :: Handler YJ.Value
 postSlackR = do
@@ -29,9 +28,13 @@ postSlackR = do
         case eventType of
             UrlVerification c -> do
                 returnJson $ "{'challenge':'"++ c ++"'}"
+            Message u um      -> do
+                let eum = u ++ " said: " ++ um
+                _ <- liftIO $ sendMessage (unpack eum)
+                return $ "{}"
             _                 -> do
-                response <- liftIO $ sendMessage
-                returnJson response
+                $(logInfo) "Not handled event"
+                return $ "{}"
 
 {-
 SLACK
@@ -40,7 +43,10 @@ getSlackAuthToken :: ByteString
 getSlackAuthToken = "Bearer " ++ (Data.Text.Encoding.encodeUtf8 $ slackAuthToken compileTimeAppSettings)
 
 getEventType :: Value -> EventType
-getEventType (Object l) = fromJust $ isUrlVerification l <|> (Just EventTypeError)
+getEventType (Object l) = fromJust $
+                          isUrlVerification l <|>
+                          isMessage l <|>
+                          (Just EventTypeError)
 getEventType _ = EventTypeError
 
 isUrlVerification :: HashMap Text Value -> Maybe EventType
@@ -49,13 +55,24 @@ isUrlVerification l = do
     (String c) <- lookup "challenge" l
     return $ UrlVerification c
 
-sendMessage :: IO Object
-sendMessage = do
+isMessage :: HashMap Text Value -> Maybe EventType
+isMessage l = do
+    (Object event) <- lookup "event" l
+    case (lookup "bot_id" event) of -- Quick and dirty way to check if is bot's message
+        Nothing -> do
+                   (String user') <- lookup "user" event
+                   (String user_message') <- lookup "text" event
+                   return $ Message user' user_message'
+        _       -> Nothing
+
+
+sendMessage :: String -> IO Object
+sendMessage m = do
     initialRequest <- parseRequest (base_url ++ "/chat.postMessage")
     let authToken = getSlackAuthToken
         request =  initialRequest { method = "POST",
                                     requestHeaders = [("Authorization", authToken), ("content-type","application/json")],
-                                    requestBody = RequestBodyLBS sample_body_json
+                                    requestBody = RequestBodyLBS echo_message
                                   }
     manager <- Network.HTTP.Client.newManager tlsManagerSettings
     response <- Network.HTTP.Client.httpLbs request manager
@@ -65,3 +82,5 @@ sendMessage = do
     case ((decode $ responseBody response) :: Maybe Object) of -- Quick and dirty way to parse response
             Just v -> return v
             _      -> error "error on posting message to slack"
+    where echo_message :: LB.ByteString
+          echo_message = LB.pack $ "{\"channel\":\"#testing\",\"text\":\"" ++ m ++ "\"}"
